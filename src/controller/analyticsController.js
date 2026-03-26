@@ -25,7 +25,6 @@ class AnalyticsController {
         JOIN job_skills js ON s.id = js.skill_id
         GROUP BY s.name
         ORDER BY count DESC
-        LIMIT 100
       `);
 
       res.json({
@@ -82,6 +81,56 @@ class AnalyticsController {
         data: result.rows.map(row => ({
           date: row.date,
           count: parseInt(row.count)
+        }))
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getSalaryByRole(req, res, next) {
+    try {
+      const result = await db.query(`
+        SELECT l.name as role, 
+               AVG(j.salary_min) as avg_min, 
+               AVG(j.salary_max) as avg_max,
+               COUNT(j.id) as job_count
+        FROM levels l
+        JOIN jobs j ON l.id = j.level_id
+        WHERE j.salary_min IS NOT NULL
+        GROUP BY l.name
+        ORDER BY avg_min DESC
+      `);
+
+      res.json({
+        status: 'success',
+        data: result.rows.map(row => ({
+          role: row.role,
+          avg_min: Math.round(parseFloat(row.avg_min)),
+          avg_max: Math.round(parseFloat(row.avg_max)),
+          job_count: parseInt(row.job_count)
+        }))
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async getLevelStats(req, res, next) {
+    try {
+      const result = await db.query(`
+        SELECT l.name as level, COUNT(j.id) as job_count
+        FROM levels l
+        LEFT JOIN jobs j ON l.id = j.level_id
+        GROUP BY l.name, l.id
+        ORDER BY job_count DESC
+      `);
+
+      res.json({
+        status: 'success',
+        data: result.rows.map(row => ({
+          level: row.level,
+          job_count: parseInt(row.job_count)
         }))
       });
     } catch (err) {

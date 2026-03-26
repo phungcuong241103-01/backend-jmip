@@ -179,13 +179,17 @@ class JobService {
       FROM skills s 
       JOIN job_skills js ON s.id = js.skill_id 
       GROUP BY s.name 
-      ORDER BY count DESC LIMIT 100
+      ORDER BY count DESC
     `);
+
+    // Get total job_skills rows for accurate percentage
+    const totalJobSkills = await db.query('SELECT COUNT(*) FROM job_skills');
+    const totalJobSkillsCount = parseInt(totalJobSkills.rows[0].count);
     
     const totalCount = parseInt(totalJobs.rows[0].count);
     const popularSkills = topSkillsResult.rows.map(row => ({
       ...row,
-      percentage: totalCount > 0 ? Math.round((parseInt(row.count) / totalCount) * 100) : 0
+      percentage: totalJobSkillsCount > 0 ? Math.round((parseInt(row.count) / totalJobSkillsCount) * 100) : 0
     }));
 
     // Stats by location
@@ -194,7 +198,7 @@ class JobService {
       FROM locations loc
       JOIN jobs j ON loc.id = j.location_id
       GROUP BY loc.city
-      ORDER BY count DESC LIMIT 5
+      ORDER BY count DESC
     `);
 
     // Average salary by role
@@ -207,8 +211,13 @@ class JobService {
       ORDER BY avg_min DESC LIMIT 5
     `);
 
+    // Total distinct skills count
+    const totalSkillsCount = await db.query('SELECT COUNT(*) FROM skills');
+
     return {
       totalJobs: totalCount,
+      totalSkills: parseInt(totalSkillsCount.rows[0].count),
+      totalJobSkills: totalJobSkillsCount,
       popularSkills,
       locationStats: locationStats.rows,
       salaryStats: salaryStats.rows,
