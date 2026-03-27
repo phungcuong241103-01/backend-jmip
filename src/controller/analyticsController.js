@@ -137,6 +137,51 @@ class AnalyticsController {
       next(err);
     }
   }
+
+  async getRoleAnalytics(req, res, next) {
+    try {
+      // Lấy thông tin role: số lượng job, lương trung bình
+      const rolesResult = await db.query(`
+        SELECT r.id, r.name as role, 
+               COUNT(j.id) as job_count,
+               AVG(j.salary_min) as avg_min, 
+               AVG(j.salary_max) as avg_max
+        FROM roles r
+        LEFT JOIN jobs j ON r.id = j.role_id
+        GROUP BY r.id, r.name
+        ORDER BY job_count DESC
+      `);
+
+      // Lấy skills cho mỗi role từ bảng role_skills
+      const skillsResult = await db.query(`
+        SELECT rs.role_id, s.name as skill_name
+        FROM role_skills rs
+        JOIN skills s ON rs.skill_id = s.id
+        ORDER BY rs.role_id
+      `);
+
+      // Map skills theo role_id
+      const skillsByRole = {};
+      for (const row of skillsResult.rows) {
+        if (!skillsByRole[row.role_id]) skillsByRole[row.role_id] = [];
+        skillsByRole[row.role_id].push(row.skill_name);
+      }
+
+      res.json({
+        status: 'success',
+        data: rolesResult.rows.map(row => ({
+          id: row.id,
+          role: row.role,
+          job_count: parseInt(row.job_count),
+          avg_min: row.avg_min ? Math.round(parseFloat(row.avg_min)) : null,
+          avg_max: row.avg_max ? Math.round(parseFloat(row.avg_max)) : null,
+          skills: skillsByRole[row.id] || []
+        }))
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = new AnalyticsController();

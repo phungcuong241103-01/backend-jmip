@@ -180,4 +180,43 @@ router.get('/salary-by-role', analyticsController.getSalaryByRole);
  */
 router.get('/levels', analyticsController.getLevelStats);
 
+/**
+ * @swagger
+ * /api/analytics/roles:
+ *   get:
+ *     summary: Thống kê theo vai trò (role)
+ *     description: Số lượng job, lương trung bình và skills liên quan theo từng role
+ *     tags: [Analytics]
+ *     responses:
+ *       200:
+ *         description: Dữ liệu phân tích role
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       role:
+ *                         type: string
+ *                       job_count:
+ *                         type: integer
+ *                       avg_min:
+ *                         type: integer
+ *                       avg_max:
+ *                         type: integer
+ *                       skills:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ */
+router.get('/roles', analyticsController.getRoleAnalytics);
+
 module.exports = router;
