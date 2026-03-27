@@ -27,10 +27,8 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('❌ Unexpected error on idle client:', err.message);
-  // Do NOT call process.exit() here — it crashes the entire server on Render
 });
 
-// Startup connection test
 pool.query('SELECT NOW()')
   .then(res => console.log(`✅ DB connection verified at ${res.rows[0].now}`))
   .catch(err => console.error(`❌ DB connection failed: ${err.message}`));
