@@ -140,31 +140,59 @@ class AnalyticsController {
 
   async getRoleAnalytics(req, res, next) {
     try {
-      // Lấy thông tin role: số lượng job, lương trung bình
+      // Lấy thông tin role với job_count tính qua role_skills -> job_skills
+      // (vì hầu hết jobs không có role_id, nên đếm qua skills liên quan)
       const rolesResult = await db.query(`
-        SELECT r.id, r.name as role, 
-               COUNT(j.id) as job_count,
-               AVG(j.salary_min) as avg_min, 
-               AVG(j.salary_max) as avg_max
+        SELECT r.id, r.name as role,
+          (SELECT COUNT(DISTINCT js.job_id)
+           FROM role_skills rs
+           JOIN job_skills js ON rs.skill_id = js.skill_id
+           WHERE rs.role_id = r.id) as job_count
         FROM roles r
-        LEFT JOIN jobs j ON r.id = j.role_id
-        GROUP BY r.id, r.name
         ORDER BY job_count DESC
       `);
 
-      // Lấy skills cho mỗi role từ bảng role_skills
+      // Lấy skills cho mỗi role từ bảng role_skills, kèm số lượng jobs của mỗi skill
       const skillsResult = await db.query(`
-        SELECT rs.role_id, s.name as skill_name
+        SELECT rs.role_id, s.name as skill_name,
+               COUNT(js.job_id) as skill_job_count
         FROM role_skills rs
         JOIN skills s ON rs.skill_id = s.id
-        ORDER BY rs.role_id
+        LEFT JOIN job_skills js ON s.id = js.skill_id
+        GROUP BY rs.role_id, s.name
+        ORDER BY rs.role_id, skill_job_count DESC
+      `);
+
+      // Lấy lương trung bình cho mỗi role qua skills
+      const salaryResult = await db.query(`
+        SELECT r.id as role_id,
+               AVG(j.salary_min) as avg_min,
+               AVG(j.salary_max) as avg_max
+        FROM roles r
+        JOIN role_skills rs ON r.id = rs.role_id
+        JOIN job_skills js ON rs.skill_id = js.skill_id
+        JOIN jobs j ON js.job_id = j.id
+        WHERE j.salary_min IS NOT NULL
+        GROUP BY r.id
       `);
 
       // Map skills theo role_id
       const skillsByRole = {};
       for (const row of skillsResult.rows) {
         if (!skillsByRole[row.role_id]) skillsByRole[row.role_id] = [];
-        skillsByRole[row.role_id].push(row.skill_name);
+        skillsByRole[row.role_id].push({
+          name: row.skill_name,
+          job_count: parseInt(row.skill_job_count)
+        });
+      }
+
+      // Map salary theo role_id
+      const salaryByRole = {};
+      for (const row of salaryResult.rows) {
+        salaryByRole[row.role_id] = {
+          avg_min: row.avg_min ? Math.round(parseFloat(row.avg_min)) : null,
+          avg_max: row.avg_max ? Math.round(parseFloat(row.avg_max)) : null
+        };
       }
 
       res.json({
@@ -173,9 +201,10 @@ class AnalyticsController {
           id: row.id,
           role: row.role,
           job_count: parseInt(row.job_count),
-          avg_min: row.avg_min ? Math.round(parseFloat(row.avg_min)) : null,
-          avg_max: row.avg_max ? Math.round(parseFloat(row.avg_max)) : null,
-          skills: skillsByRole[row.id] || []
+          avg_min: salaryByRole[row.id]?.avg_min || null,
+          avg_max: salaryByRole[row.id]?.avg_max || null,
+          skills: (skillsByRole[row.id] || []).map(s => s.name),
+          skills_detail: skillsByRole[row.id] || []
         }))
       });
     } catch (err) {
