@@ -35,7 +35,8 @@ class JobService {
     let baseJoins = `
       LEFT JOIN companies c ON j.company_id = c.id
       LEFT JOIN roles r ON j.role_id = r.id
-      LEFT JOIN levels l ON j.level_id = l.id
+      LEFT JOIN job_levels jl_filter ON j.id = jl_filter.job_id
+      LEFT JOIN levels l ON jl_filter.level_id = l.id
       LEFT JOIN locations loc ON j.location_id = loc.id
     `;
     let baseWhere = `WHERE 1=1`;
@@ -82,14 +83,15 @@ class JobService {
 
     // Fetch paginated results
     let query = `
-      SELECT j.*, c.name as company_name, r.name as role_name, l.name as level_name, loc.city,
-             COALESCE(array_agg(s.name) FILTER (WHERE s.name IS NOT NULL), '{}') as skills
+      SELECT j.*, c.name as company_name, r.name as role_name, loc.city,
+             COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') as skills,
+             COALESCE(array_agg(DISTINCT l.name) FILTER (WHERE l.name IS NOT NULL), '{}') as level_names
       FROM jobs j
       ${baseJoins}
       LEFT JOIN job_skills js ON j.id = js.job_id
       LEFT JOIN skills s ON js.skill_id = s.id
       ${baseWhere}
-      GROUP BY j.id, c.name, r.name, l.name, loc.city
+      GROUP BY j.id, c.name, r.name, loc.city
       ORDER BY j.posted_at DESC
       LIMIT $${counter++} OFFSET $${counter++}
     `;
@@ -114,7 +116,8 @@ class JobService {
       SELECT AVG(salary_min) as avg_min, AVG(salary_max) as avg_max, COUNT(*) as count
       FROM jobs j
       JOIN roles r ON j.role_id = r.id
-      JOIN levels l ON j.level_id = l.id
+      JOIN job_levels jl ON j.id = jl.job_id
+      JOIN levels l ON jl.level_id = l.id
       WHERE r.name = $1 AND l.name = $2
     `;
     const stats = await db.query(query, [role, level]);

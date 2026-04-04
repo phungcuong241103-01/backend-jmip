@@ -7,6 +7,7 @@ const rolesController = require('../controller/rolesController');
 const levelsController = require('../controller/levelsController');
 const skillsController = require('../controller/skillsController');
 const jobSkillsController = require('../controller/jobSkillsController');
+const jobLevelController = require('../controller/jobLevelController');
 
 // ============ JOBS ============
 
@@ -76,8 +77,10 @@ const jobSkillsController = require('../controller/jobSkillsController');
  *                         type: string
  *                       role_name:
  *                         type: string
- *                       level_name:
- *                         type: string
+ *                       level_names:
+ *                         type: array
+ *                         items:
+ *                           type: string
  *                       city:
  *                         type: string
  *                       salary_min:
@@ -506,5 +509,57 @@ router.get('/job-skills', jobSkillsController.getAll);
  *         description: Danh sách skills của job
  */
 router.get('/jobs/:jobId/skills', jobSkillsController.getByJobId);
+
+// ============ JOB-LEVELS ============
+
+/**
+ * @swagger
+ * /api/job-levels:
+ *   get:
+ *     summary: Lấy tất cả quan hệ job-level
+ *     tags: [Metadata]
+ *     responses:
+ *       200:
+ *         description: Danh sách job_levels
+ */
+router.get('/job-levels', jobLevelController.getAll);
+
+/**
+ * @swagger
+ * /api/jobs/{jobId}/levels:
+ *   get:
+ *     summary: Lấy levels của một job cụ thể
+ *     tags: [Jobs]
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID của job
+ *     responses:
+ *       200:
+ *         description: Danh sách levels của job
+ */
+router.get('/jobs/:jobId/levels', jobLevelController.getByJobId);
+
+/**
+ * @swagger
+ * /api/levels/{levelId}/jobs:
+ *   get:
+ *     summary: Lấy jobs theo level
+ *     tags: [Jobs]
+ *     parameters:
+ *       - in: path
+ *         name: levelId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID của level
+ *     responses:
+ *       200:
+ *         description: Danh sách jobs thuộc level
+ */
+router.get('/levels/:levelId/jobs', jobLevelController.getJobsByLevel);
 
 module.exports = router;

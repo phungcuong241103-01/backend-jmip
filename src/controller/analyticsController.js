@@ -96,7 +96,8 @@ class AnalyticsController {
                AVG(j.salary_max) as avg_max,
                COUNT(j.id) as job_count
         FROM levels l
-        JOIN jobs j ON l.id = j.level_id
+        JOIN job_levels jl ON l.id = jl.level_id
+        JOIN jobs j ON jl.job_id = j.id
         WHERE j.salary_min IS NOT NULL
         GROUP BY l.name
         ORDER BY avg_min DESC
@@ -119,9 +120,10 @@ class AnalyticsController {
   async getLevelStats(req, res, next) {
     try {
       const result = await db.query(`
-        SELECT l.name as level, COUNT(j.id) as job_count
+        SELECT l.name as level, COUNT(DISTINCT j.id) as job_count
         FROM levels l
-        LEFT JOIN jobs j ON l.id = j.level_id
+        LEFT JOIN job_levels jl ON l.id = jl.level_id
+        LEFT JOIN jobs j ON jl.job_id = j.id
         GROUP BY l.name, l.id
         ORDER BY job_count DESC
       `);

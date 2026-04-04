@@ -52,12 +52,14 @@ app.get('/api/jobs', async (req, res) => {
   const { role, level, location, skills } = req.query;
   try {
     let query = `
-      SELECT j.*, c.name as company_name, r.name as role_name, l.name as level_name, loc.city, loc.country,
-             array_agg(s.name) as skills
+      SELECT j.*, c.name as company_name, r.name as role_name, loc.city, loc.country,
+             array_agg(DISTINCT s.name) as skills,
+             array_agg(DISTINCT l.name) as level_names
       FROM jobs j
       LEFT JOIN companies c ON j.company_id = c.id
       LEFT JOIN roles r ON j.role_id = r.id
-      LEFT JOIN levels l ON j.level_id = l.id
+      LEFT JOIN job_levels jl ON j.id = jl.job_id
+      LEFT JOIN levels l ON jl.level_id = l.id
       LEFT JOIN locations loc ON j.location_id = loc.id
       LEFT JOIN job_skills js ON j.id = js.job_id
       LEFT JOIN skills s ON js.skill_id = s.id
@@ -79,7 +81,7 @@ app.get('/api/jobs', async (req, res) => {
       values.push(location);
     }
 
-    query += ` GROUP BY j.id, c.name, r.name, l.name, loc.city, loc.country ORDER BY j.posted_at DESC LIMIT 20`;
+    query += ` GROUP BY j.id, c.name, r.name, loc.city, loc.country ORDER BY j.posted_at DESC LIMIT 20`;
     
     const result = await pool.query(query, values);
     res.json(result.rows);
@@ -97,7 +99,8 @@ app.post('/api/predict-salary', async (req, res) => {
       SELECT AVG(salary_min) as avg_min, AVG(salary_max) as avg_max, COUNT(*) as count
       FROM jobs j
       JOIN roles r ON j.role_id = r.id
-      JOIN levels l ON j.level_id = l.id
+      JOIN job_levels jl ON j.id = jl.job_id
+      JOIN levels l ON jl.level_id = l.id
       WHERE r.name = $1 AND l.name = $2
     `;
     const stats = await pool.query(query, [role, level]);
