@@ -14,6 +14,7 @@ class JobService {
         SELECT s.id, s.name, COUNT(js.job_id) as count 
         FROM skills s 
         LEFT JOIN job_skills js ON s.id = js.skill_id 
+        LEFT JOIN jobs j ON js.job_id = j.id AND j.is_active = TRUE
         GROUP BY s.id, s.name 
         ORDER BY count DESC, name ASC
       `),
@@ -39,7 +40,7 @@ class JobService {
       LEFT JOIN levels l ON jl_filter.level_id = l.id
       LEFT JOIN locations loc ON j.location_id = loc.id
     `;
-    let baseWhere = `WHERE 1=1`;
+    let baseWhere = `WHERE j.is_active = TRUE`;
     const values = [];
     let counter = 1;
 
@@ -118,7 +119,7 @@ class JobService {
       JOIN roles r ON j.role_id = r.id
       JOIN job_levels jl ON j.id = jl.job_id
       JOIN levels l ON jl.level_id = l.id
-      WHERE r.name = $1 AND l.name = $2
+      WHERE j.is_active = TRUE AND r.name = $1 AND l.name = $2
     `;
     const stats = await db.query(query, [role, level]);
     const dbResult = stats.rows[0];
@@ -174,19 +175,21 @@ class JobService {
   }
 
   async getMarketStats() {
-    const totalJobs = await db.query('SELECT COUNT(*) FROM jobs');
+    const totalJobs = await db.query('SELECT COUNT(*) FROM jobs WHERE is_active = TRUE');
     
     // Top skills with counts and percentage calculation
     const topSkillsResult = await db.query(`
       SELECT s.name, COUNT(js.job_id) as count 
       FROM skills s 
       JOIN job_skills js ON s.id = js.skill_id 
+      JOIN jobs j ON js.job_id = j.id
+      WHERE j.is_active = TRUE
       GROUP BY s.name 
       ORDER BY count DESC
     `);
 
     // Get total job_skills rows for accurate percentage
-    const totalJobSkills = await db.query('SELECT COUNT(*) FROM job_skills');
+    const totalJobSkills = await db.query('SELECT COUNT(*) FROM job_skills js JOIN jobs j ON js.job_id = j.id WHERE j.is_active = TRUE');
     const totalJobSkillsCount = parseInt(totalJobSkills.rows[0].count);
     
     const totalCount = parseInt(totalJobs.rows[0].count);
@@ -200,6 +203,7 @@ class JobService {
       SELECT loc.city as name, COUNT(j.id) as count
       FROM locations loc
       JOIN jobs j ON loc.id = j.location_id
+      WHERE j.is_active = TRUE
       GROUP BY loc.city
       ORDER BY count DESC
     `);
@@ -209,7 +213,7 @@ class JobService {
       SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
       FROM roles r
       JOIN jobs j ON r.id = j.role_id
-      WHERE j.salary_min IS NOT NULL
+      WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
       GROUP BY r.name
       ORDER BY avg_min DESC LIMIT 5
     `);
@@ -225,7 +229,7 @@ class JobService {
       locationStats: locationStats.rows,
       salaryStats: salaryStats.rows,
       growthRate: "+12.5%", // Mocked for now as we don't have historical data trends easily
-      activeCompanies: await db.query('SELECT COUNT(*) FROM companies').then(res => res.rows[0].count)
+      activeCompanies: await db.query('SELECT COUNT(DISTINCT c.id) FROM companies c JOIN jobs j ON c.id = j.company_id WHERE j.is_active = TRUE').then(res => res.rows[0].count)
     };
   }
 

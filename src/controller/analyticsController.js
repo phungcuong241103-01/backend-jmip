@@ -3,7 +3,7 @@ const db = require('../config/db');
 class AnalyticsController {
   async getOverview(req, res, next) {
     try {
-      const result = await db.query('SELECT COUNT(*) as total_jobs FROM jobs');
+      const result = await db.query('SELECT COUNT(*) as total_jobs FROM jobs WHERE is_active = TRUE');
       const totalJobs = parseInt(result.rows[0].total_jobs);
 
       res.json({
@@ -23,6 +23,8 @@ class AnalyticsController {
         SELECT s.name, COUNT(js.job_id) as count
         FROM skills s
         JOIN job_skills js ON s.id = js.skill_id
+        JOIN jobs j ON js.job_id = j.id
+        WHERE j.is_active = TRUE
         GROUP BY s.name
         ORDER BY count DESC
       `);
@@ -45,7 +47,7 @@ class AnalyticsController {
         SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
         FROM roles r
         JOIN jobs j ON r.id = j.role_id
-        WHERE j.salary_min IS NOT NULL
+        WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
         GROUP BY r.name
         ORDER BY avg_min DESC
         LIMIT 10
@@ -70,7 +72,7 @@ class AnalyticsController {
       const result = await db.query(`
         SELECT DATE(posted_at) as date, COUNT(id) as count
         FROM jobs
-        WHERE posted_at IS NOT NULL
+        WHERE posted_at IS NOT NULL AND is_active = TRUE
         GROUP BY DATE(posted_at)
         ORDER BY DATE(posted_at) ASC
         LIMIT 30
@@ -98,7 +100,7 @@ class AnalyticsController {
         FROM levels l
         JOIN job_levels jl ON l.id = jl.level_id
         JOIN jobs j ON jl.job_id = j.id
-        WHERE j.salary_min IS NOT NULL
+        WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
         GROUP BY l.name
         ORDER BY avg_min DESC
       `);
@@ -123,7 +125,7 @@ class AnalyticsController {
         SELECT l.name as level, COUNT(DISTINCT j.id) as job_count
         FROM levels l
         LEFT JOIN job_levels jl ON l.id = jl.level_id
-        LEFT JOIN jobs j ON jl.job_id = j.id
+        LEFT JOIN jobs j ON jl.job_id = j.id AND j.is_active = TRUE
         GROUP BY l.name, l.id
         ORDER BY job_count DESC
       `);
@@ -149,7 +151,8 @@ class AnalyticsController {
           (SELECT COUNT(DISTINCT js.job_id)
            FROM role_skills rs
            JOIN job_skills js ON rs.skill_id = js.skill_id
-           WHERE rs.role_id = r.id) as job_count
+           JOIN jobs j ON js.job_id = j.id
+           WHERE rs.role_id = r.id AND j.is_active = TRUE) as job_count
         FROM roles r
         ORDER BY job_count DESC
       `);
@@ -157,10 +160,11 @@ class AnalyticsController {
       // Lấy skills cho mỗi role từ bảng role_skills, kèm số lượng jobs của mỗi skill
       const skillsResult = await db.query(`
         SELECT rs.role_id, s.name as skill_name,
-               COUNT(js.job_id) as skill_job_count
+               COUNT(DISTINCT js.job_id) as skill_job_count
         FROM role_skills rs
         JOIN skills s ON rs.skill_id = s.id
         LEFT JOIN job_skills js ON s.id = js.skill_id
+        LEFT JOIN jobs j ON js.job_id = j.id AND j.is_active = TRUE
         GROUP BY rs.role_id, s.name
         ORDER BY rs.role_id, skill_job_count DESC
       `);
@@ -174,7 +178,7 @@ class AnalyticsController {
         JOIN role_skills rs ON r.id = rs.role_id
         JOIN job_skills js ON rs.skill_id = js.skill_id
         JOIN jobs j ON js.job_id = j.id
-        WHERE j.salary_min IS NOT NULL
+        WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
         GROUP BY r.id
       `);
 
