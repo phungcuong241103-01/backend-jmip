@@ -35,6 +35,7 @@ class JobService {
     
     let baseJoins = `
       LEFT JOIN companies c ON j.company_id = c.id
+      LEFT JOIN roles r ON j.role_id = r.id
       LEFT JOIN job_levels jl_filter ON j.id = jl_filter.job_id
       LEFT JOIN levels l ON jl_filter.level_id = l.id
       LEFT JOIN locations loc ON j.location_id = loc.id
@@ -44,12 +45,7 @@ class JobService {
     let counter = 1;
 
     if (role) {
-      baseWhere += ` AND EXISTS (
-        SELECT 1 FROM role_skills rs_f
-        JOIN roles r_f ON rs_f.role_id = r_f.id
-        JOIN job_skills js_f ON rs_f.skill_id = js_f.skill_id
-        WHERE js_f.job_id = j.id AND r_f.name = $${counter++}
-      )`;
+      baseWhere += ` AND r.name = $${counter++}`;
       values.push(role);
     }
     if (level) {
@@ -88,13 +84,7 @@ class JobService {
 
     // Fetch paginated results
     let query = `
-      SELECT j.*, c.name as company_name,
-             (SELECT r_sub.name FROM role_skills rs_sub
-              JOIN roles r_sub ON rs_sub.role_id = r_sub.id
-              JOIN job_skills js_sub ON rs_sub.skill_id = js_sub.skill_id
-              WHERE js_sub.job_id = j.id
-              GROUP BY r_sub.name ORDER BY COUNT(*) DESC LIMIT 1) as role_name,
-             loc.city,
+      SELECT j.*, c.name as company_name, r.name as role_name, loc.city,
              COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') as skills,
              COALESCE(array_agg(DISTINCT l.name) FILTER (WHERE l.name IS NOT NULL), '{}') as level_names
       FROM jobs j
@@ -102,7 +92,7 @@ class JobService {
       LEFT JOIN job_skills js ON j.id = js.job_id
       LEFT JOIN skills s ON js.skill_id = s.id
       ${baseWhere}
-      GROUP BY j.id, c.name, loc.city
+      GROUP BY j.id, c.name, r.name, loc.city
       ORDER BY j.posted_at DESC
       LIMIT $${counter++} OFFSET $${counter++}
     `;
@@ -126,9 +116,7 @@ class JobService {
     const query = `
       SELECT AVG(salary_min) as avg_min, AVG(salary_max) as avg_max, COUNT(*) as count
       FROM jobs j
-      JOIN role_skills rs ON TRUE
-      JOIN roles r ON rs.role_id = r.id
-      JOIN job_skills js ON rs.skill_id = js.skill_id AND js.job_id = j.id
+      JOIN roles r ON j.role_id = r.id
       JOIN job_levels jl ON j.id = jl.job_id
       JOIN levels l ON jl.level_id = l.id
       WHERE j.is_active = TRUE AND r.name = $1 AND l.name = $2
@@ -220,13 +208,11 @@ class JobService {
       ORDER BY count DESC
     `);
 
-    // Average salary by role (qua role_skills → job_skills)
+    // Average salary by role
     const salaryStats = await db.query(`
       SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
       FROM roles r
-      JOIN role_skills rs ON r.id = rs.role_id
-      JOIN job_skills js ON rs.skill_id = js.skill_id
-      JOIN jobs j ON js.job_id = j.id
+      JOIN jobs j ON r.id = j.role_id
       WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
       GROUP BY r.name
       ORDER BY avg_min DESC LIMIT 5
