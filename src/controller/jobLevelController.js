@@ -39,12 +39,18 @@ class JobLevelController {
     try {
       const { levelId } = req.params;
       const result = await db.query(`
-        SELECT j.*, c.name as company_name, r.name as role_name, l.name as level_name, loc.city
+        SELECT j.*,
+               c.name as company_name,
+               (SELECT r_sub.name FROM role_skills rs_sub
+                JOIN roles r_sub ON rs_sub.role_id = r_sub.id
+                JOIN job_skills js_sub ON rs_sub.skill_id = js_sub.skill_id
+                WHERE js_sub.job_id = j.id
+                GROUP BY r_sub.name ORDER BY COUNT(*) DESC LIMIT 1) as role_name,
+               l.name as level_name, loc.city
         FROM jobs j
         JOIN job_levels jl ON j.id = jl.job_id
         JOIN levels l ON jl.level_id = l.id
         LEFT JOIN companies c ON j.company_id = c.id
-        LEFT JOIN roles r ON j.role_id = r.id
         LEFT JOIN locations loc ON j.location_id = loc.id
         WHERE jl.level_id = $1
         ORDER BY j.posted_at DESC

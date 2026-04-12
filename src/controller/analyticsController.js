@@ -43,10 +43,13 @@ class AnalyticsController {
 
   async getSalary(req, res, next) {
     try {
+      // Tính lương theo role qua role_skills → job_skills (không dùng legacy role_id)
       const result = await db.query(`
         SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
         FROM roles r
-        JOIN jobs j ON r.id = j.role_id
+        JOIN role_skills rs ON r.id = rs.role_id
+        JOIN job_skills js ON rs.skill_id = js.skill_id
+        JOIN jobs j ON js.job_id = j.id
         WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
         GROUP BY r.name
         ORDER BY avg_min DESC
@@ -144,24 +147,32 @@ class AnalyticsController {
 
   async getRoleAnalytics(req, res, next) {
     try {
-      // Đếm job trực tiếp qua role_id (chính xác, không bị trùng)
-      // Kết hợp đếm qua skill-matching cho roles chưa có job trực tiếp
-      // Mỗi job chỉ cần match >= 2 skills của role mới tính (giảm false positive)
+      // Bước 1: Tìm "best role" cho mỗi job dựa vào role có nhiều matching skills nhất
+      // Mỗi job chỉ được gán vào ĐÚNG 1 role → không bị đếm trùng
+      // Dùng role_skills → job_skills (KHÔNG dùng legacy jobs.role_id)
       const rolesResult = await db.query(`
+        WITH job_role_matches AS (
+          -- Đếm số skills match giữa mỗi job và mỗi role
+          SELECT js.job_id, rs.role_id, COUNT(*) as match_count
+          FROM job_skills js
+          JOIN role_skills rs ON js.skill_id = rs.skill_id
+          JOIN jobs j ON js.job_id = j.id
+          WHERE j.is_active = TRUE
+          GROUP BY js.job_id, rs.role_id
+          HAVING COUNT(*) >= 1
+        ),
+        best_role AS (
+          -- Mỗi job chỉ gán vào role có nhiều skills match nhất
+          SELECT DISTINCT ON (job_id) job_id, role_id, match_count
+          FROM job_role_matches
+          ORDER BY job_id, match_count DESC, role_id
+        )
         SELECT r.id, r.name as role,
-          (SELECT COUNT(*) FROM jobs j WHERE j.role_id = r.id AND j.is_active = TRUE) as direct_count,
-          (SELECT COUNT(DISTINCT js.job_id)
-           FROM (
-             SELECT js2.job_id, COUNT(rs2.skill_id) as match_count
-             FROM role_skills rs2
-             JOIN job_skills js2 ON rs2.skill_id = js2.skill_id
-             JOIN jobs j2 ON js2.job_id = j2.id
-             WHERE rs2.role_id = r.id AND j2.is_active = TRUE AND j2.role_id IS DISTINCT FROM r.id
-             GROUP BY js2.job_id
-             HAVING COUNT(rs2.skill_id) >= 2
-           ) js) as skill_count
+               COUNT(br.job_id) as job_count
         FROM roles r
-        ORDER BY direct_count DESC, skill_count DESC
+        LEFT JOIN best_role br ON r.id = br.role_id
+        GROUP BY r.id, r.name
+        ORDER BY job_count DESC
       `);
 
       // Lấy skills cho mỗi role từ bảng role_skills, kèm số lượng jobs của mỗi skill
@@ -176,15 +187,28 @@ class AnalyticsController {
         ORDER BY rs.role_id, skill_job_count DESC
       `);
 
-      // Lấy lương trung bình cho mỗi role (ưu tiên qua role_id trực tiếp)
+      // Lấy lương trung bình cho mỗi role qua skill-matching
       const salaryResult = await db.query(`
-        SELECT r.id as role_id,
+        WITH job_role_matches AS (
+          SELECT js.job_id, rs.role_id, COUNT(*) as match_count
+          FROM job_skills js
+          JOIN role_skills rs ON js.skill_id = rs.skill_id
+          JOIN jobs j ON js.job_id = j.id
+          WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
+          GROUP BY js.job_id, rs.role_id
+        ),
+        best_role AS (
+          SELECT DISTINCT ON (job_id) job_id, role_id
+          FROM job_role_matches
+          ORDER BY job_id, match_count DESC, role_id
+        )
+        SELECT br.role_id,
                AVG(j.salary_min) as avg_min,
                AVG(j.salary_max) as avg_max
-        FROM roles r
-        JOIN jobs j ON j.role_id = r.id
-        WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
-        GROUP BY r.id
+        FROM best_role br
+        JOIN jobs j ON br.job_id = j.id
+        WHERE j.salary_min IS NOT NULL
+        GROUP BY br.role_id
       `);
 
       // Map skills theo role_id
@@ -208,21 +232,15 @@ class AnalyticsController {
 
       res.json({
         status: 'success',
-        data: rolesResult.rows.map(row => {
-          const direct = parseInt(row.direct_count);
-          const skill = parseInt(row.skill_count);
-          // Dùng direct_count nếu có, nếu không thì dùng skill_count
-          const job_count = direct > 0 ? direct : skill;
-          return {
-            id: row.id,
-            role: row.role,
-            job_count,
-            avg_min: salaryByRole[row.id]?.avg_min || null,
-            avg_max: salaryByRole[row.id]?.avg_max || null,
-            skills: (skillsByRole[row.id] || []).map(s => s.name),
-            skills_detail: skillsByRole[row.id] || []
-          };
-        })
+        data: rolesResult.rows.map(row => ({
+          id: row.id,
+          role: row.role,
+          job_count: parseInt(row.job_count),
+          avg_min: salaryByRole[row.id]?.avg_min || null,
+          avg_max: salaryByRole[row.id]?.avg_max || null,
+          skills: (skillsByRole[row.id] || []).map(s => s.name),
+          skills_detail: skillsByRole[row.id] || []
+        }))
       });
     } catch (err) {
       next(err);
