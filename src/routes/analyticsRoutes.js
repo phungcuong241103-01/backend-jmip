@@ -219,4 +219,42 @@ router.get('/levels', analyticsController.getLevelStats);
  */
 router.get('/roles', analyticsController.getRoleAnalytics);
 
+/**
+ * @swagger
+ * /api/analytics/filtered:
+ *   get:
+ *     summary: Dữ liệu phân tích tổng hợp (có filter)
+ *     description: Trả về tất cả dữ liệu analytics trong 1 request, hỗ trợ lọc theo role_id
+ *     tags: [Analytics]
+ *     parameters:
+ *       - in: query
+ *         name: role_id
+ *         schema:
+ *           type: integer
+ *         description: ID của role để lọc (optional)
+ *     responses:
+ *       200:
+ *         description: Dữ liệu analytics tổng hợp
+ */
+router.get('/filtered', analyticsController.getFilteredAnalytics.bind(analyticsController));
+
+/**
+ * @swagger
+ * /api/analytics/ai-insights:
+ *   get:
+ *     summary: AI phân tích dữ liệu thị trường
+ *     description: Groq AI đọc dữ liệu thực từ DB và đưa ra nhận xét thông minh
+ *     tags: [Analytics]
+ *     parameters:
+ *       - in: query
+ *         name: role_id
+ *         schema:
+ *           type: integer
+ *         description: ID của role để lọc (optional)
+ *     responses:
+ *       200:
+ *         description: Nhận xét AI
+ */
+router.get('/ai-insights', analyticsController.getAIInsights.bind(analyticsController));
+
 module.exports = router;

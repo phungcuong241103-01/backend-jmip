@@ -63,39 +63,55 @@ app.use('/api/chat', chatRoutes);
 app.use(errorHandler);
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Groq API Keepalive — ping mỗi 12 giờ để tránh bị Revoked do không sử dụng
+// Groq API Keepalive Endpoint — UptimeRobot gọi endpoint này theo lịch
+// Cấu hình UptimeRobot: GET /api/groq-keepalive mỗi 6h (6:00, 12:00, 18:00, 0:00)
 // ═══════════════════════════════════════════════════════════════════════════════
-const KEEPALIVE_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 giờ
-
-async function groqKeepalive() {
+app.get('/api/groq-keepalive', async (req, res) => {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    console.log('⏭️  GROQ_API_KEY not set — skipping keepalive ping');
-    return;
+    return res.status(503).json({
+      status: 'error',
+      message: 'GROQ_API_KEY not configured',
+      timestamp: new Date().toISOString(),
+    });
   }
+
   try {
     const groq = new Groq({ apiKey });
+    const start = Date.now();
     const response = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: 'ping' }],
+      messages: [{ role: 'user', content: 'Reply with only: OK' }],
       max_tokens: 5,
     });
-    console.log(`✅ Groq keepalive OK at ${new Date().toISOString()} — reply: "${response.choices[0].message.content.trim()}"`);
+    const latency = Date.now() - start;
+    const reply = response.choices[0].message.content.trim();
+
+    console.log(`✅ Groq keepalive OK at ${new Date().toISOString()} — reply: "${reply}" (${latency}ms)`);
+
+    res.json({
+      status: 'ok',
+      groq_status: 'connected',
+      reply,
+      latency_ms: latency,
+      model: 'llama-3.3-70b-versatile',
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
     console.error(`❌ Groq keepalive FAILED at ${new Date().toISOString()}:`, err.message);
+
+    res.status(503).json({
+      status: 'error',
+      groq_status: 'failed',
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
   }
-}
+});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
   console.log(`Backend API available at http://localhost:${port}/api`);
   console.log(`Swagger Docs available at http://localhost:${port}/api-docs`);
-
-  // Chạy keepalive lần đầu sau 30 giây (đợi server khởi động xong)
-  setTimeout(() => {
-    groqKeepalive();
-    // Sau đó lặp lại mỗi 12 giờ
-    setInterval(groqKeepalive, KEEPALIVE_INTERVAL_MS);
-    console.log('🔄 Groq keepalive scheduled: every 12 hours');
-  }, 30_000);
+  console.log(`🔄 Groq keepalive endpoint: GET /api/groq-keepalive (use UptimeRobot to call at 6h, 12h, 18h, 0h)`);
 });
