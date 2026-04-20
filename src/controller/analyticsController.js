@@ -216,18 +216,45 @@ class AnalyticsController {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: Filtered Analytics — single endpoint, optional role_id filter
+  // Helper: build dynamic WHERE filters from query params
+  // ═══════════════════════════════════════════════════════════════════════════
+  _buildFilters(query) {
+    const clauses = [];
+    const params = [];
+    let idx = 1;
+
+    if (query.role_id) {
+      clauses.push(`j.role_id = $${idx++}`);
+      params.push(parseInt(query.role_id));
+    }
+    if (query.location_id) {
+      clauses.push(`j.location_id = $${idx++}`);
+      params.push(parseInt(query.location_id));
+    }
+    if (query.level_id) {
+      clauses.push(`EXISTS (SELECT 1 FROM job_levels jl_f WHERE jl_f.job_id = j.id AND jl_f.level_id = $${idx++})`);
+      params.push(parseInt(query.level_id));
+    }
+    if (query.skill_id) {
+      clauses.push(`EXISTS (SELECT 1 FROM job_skills js_f WHERE js_f.job_id = j.id AND js_f.skill_id = $${idx++})`);
+      params.push(parseInt(query.skill_id));
+    }
+
+    const where = clauses.length > 0 ? ' AND ' + clauses.join(' AND ') : '';
+    return { where, params };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Filtered Analytics — single endpoint, multi-filter support
   // ═══════════════════════════════════════════════════════════════════════════
   async getFilteredAnalytics(req, res, next) {
     try {
-      const { role_id } = req.query;
-      const roleFilter = role_id ? ' AND j.role_id = $1' : '';
-      const roleParams = role_id ? [parseInt(role_id)] : [];
+      const { where, params } = this._buildFilters(req.query);
 
       // 1. Total jobs
       const totalResult = await db.query(
-        `SELECT COUNT(*) as total FROM jobs j WHERE j.is_active = TRUE${roleFilter}`,
-        roleParams
+        `SELECT COUNT(*) as total FROM jobs j WHERE j.is_active = TRUE${where}`,
+        params
       );
       const totalJobs = parseInt(totalResult.rows[0].total);
 
@@ -237,10 +264,10 @@ class AnalyticsController {
          FROM skills s
          JOIN job_skills js ON s.id = js.skill_id
          JOIN jobs j ON js.job_id = j.id
-         WHERE j.is_active = TRUE${roleFilter}
+         WHERE j.is_active = TRUE${where}
          GROUP BY s.name
          ORDER BY count DESC`,
-        roleParams
+        params
       );
 
       // 3. Locations breakdown
@@ -248,21 +275,21 @@ class AnalyticsController {
         `SELECT loc.city as name, COUNT(j.id) as count
          FROM locations loc
          JOIN jobs j ON loc.id = j.location_id
-         WHERE j.is_active = TRUE${roleFilter}
+         WHERE j.is_active = TRUE${where}
          GROUP BY loc.city
          ORDER BY count DESC`,
-        roleParams
+        params
       );
 
       // 4. Trend (by date)
       const trendResult = await db.query(
         `SELECT DATE(j.posted_at) as date, COUNT(j.id) as count
          FROM jobs j
-         WHERE j.posted_at IS NOT NULL AND j.is_active = TRUE${roleFilter}
+         WHERE j.posted_at IS NOT NULL AND j.is_active = TRUE${where}
          GROUP BY DATE(j.posted_at)
          ORDER BY DATE(j.posted_at) ASC
          LIMIT 30`,
-        roleParams
+        params
       );
 
       // 5. Roles breakdown (nhu cầu theo vai trò)
@@ -275,7 +302,7 @@ class AnalyticsController {
          ORDER BY job_count DESC`
       );
 
-      // 6. Salary by level (filtered by role if provided)
+      // 6. Salary by level (filtered)
       const salaryByLevelResult = await db.query(
         `SELECT l.name as role, 
                 AVG(j.salary_min) as avg_min, 
@@ -284,10 +311,10 @@ class AnalyticsController {
          FROM levels l
          JOIN job_levels jl ON l.id = jl.level_id
          JOIN jobs j ON jl.job_id = j.id
-         WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL${roleFilter}
+         WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL${where}
          GROUP BY l.name
          ORDER BY avg_min DESC`,
-        roleParams
+        params
       );
 
       // 7. Levels breakdown (experience)
@@ -295,10 +322,10 @@ class AnalyticsController {
         `SELECT l.name as level, COUNT(DISTINCT j.id) as job_count
          FROM levels l
          LEFT JOIN job_levels jl ON l.id = jl.level_id
-         LEFT JOIN jobs j ON jl.job_id = j.id AND j.is_active = TRUE${roleFilter ? ' AND j.role_id = $1' : ''}
+         LEFT JOIN jobs j ON jl.job_id = j.id AND j.is_active = TRUE${where ? ' AND ' + where.replace(' AND ', '') : ''}
          GROUP BY l.name, l.id
          ORDER BY job_count DESC`,
-        roleParams
+        params
       );
 
       // 8. Active companies
@@ -306,8 +333,8 @@ class AnalyticsController {
         `SELECT COUNT(DISTINCT c.id) as count
          FROM companies c
          JOIN jobs j ON c.id = j.company_id
-         WHERE j.is_active = TRUE${roleFilter}`,
-        roleParams
+         WHERE j.is_active = TRUE${where}`,
+        params
       );
 
       res.json({
@@ -341,40 +368,54 @@ class AnalyticsController {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // NEW: AI Insights — Groq reads real DB data and analyzes
+  // AI Insights — Groq reads real DB data and analyzes (multi-filter)
   // ═══════════════════════════════════════════════════════════════════════════
   async getAIInsights(req, res, next) {
     try {
-      const { role_id } = req.query;
-      const roleFilter = role_id ? ' AND j.role_id = $1' : '';
-      const roleParams = role_id ? [parseInt(role_id)] : [];
+      const { where, params } = this._buildFilters(req.query);
+      const { role_id, location_id, level_id, skill_id } = req.query;
 
       // Gather data summary for AI
-      const [totalRes, topSkillsRes, topLocRes, salaryRes, roleName] = await Promise.all([
-        db.query(`SELECT COUNT(*) as total FROM jobs j WHERE j.is_active = TRUE${roleFilter}`, roleParams),
+      const [totalRes, topSkillsRes, topLocRes, salaryRes] = await Promise.all([
+        db.query(`SELECT COUNT(*) as total FROM jobs j WHERE j.is_active = TRUE${where}`, params),
         db.query(`SELECT s.name, COUNT(DISTINCT j.id) as count
                    FROM skills s JOIN job_skills js ON s.id = js.skill_id
                    JOIN jobs j ON js.job_id = j.id
-                   WHERE j.is_active = TRUE${roleFilter}
-                   GROUP BY s.name ORDER BY count DESC LIMIT 10`, roleParams),
+                   WHERE j.is_active = TRUE${where}
+                   GROUP BY s.name ORDER BY count DESC LIMIT 10`, params),
         db.query(`SELECT loc.city as name, COUNT(j.id) as count
                    FROM locations loc JOIN jobs j ON loc.id = j.location_id
-                   WHERE j.is_active = TRUE${roleFilter}
-                   GROUP BY loc.city ORDER BY count DESC LIMIT 5`, roleParams),
+                   WHERE j.is_active = TRUE${where}
+                   GROUP BY loc.city ORDER BY count DESC LIMIT 5`, params),
         db.query(`SELECT AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
-                   FROM jobs j WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL${roleFilter}`, roleParams),
-        role_id
-          ? db.query('SELECT name FROM roles WHERE id = $1', [parseInt(role_id)]).then(r => r.rows[0]?.name || 'N/A')
-          : Promise.resolve(null),
+                   FROM jobs j WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL${where}`, params),
       ]);
+
+      // Build context label from active filters
+      const filterLabels = [];
+      if (role_id) {
+        const r = await db.query('SELECT name FROM roles WHERE id = $1', [parseInt(role_id)]);
+        if (r.rows[0]) filterLabels.push(`vai trò "${r.rows[0].name}"`);
+      }
+      if (location_id) {
+        const r = await db.query('SELECT city FROM locations WHERE id = $1', [parseInt(location_id)]);
+        if (r.rows[0]) filterLabels.push(`tại "${r.rows[0].city}"`);
+      }
+      if (level_id) {
+        const r = await db.query('SELECT name FROM levels WHERE id = $1', [parseInt(level_id)]);
+        if (r.rows[0]) filterLabels.push(`cấp bậc "${r.rows[0].name}"`);
+      }
+      if (skill_id) {
+        const r = await db.query('SELECT name FROM skills WHERE id = $1', [parseInt(skill_id)]);
+        if (r.rows[0]) filterLabels.push(`kỹ năng "${r.rows[0].name}"`);
+      }
+      const contextLabel = filterLabels.length > 0 ? `cho ${filterLabels.join(', ')}` : 'toàn thị trường IT';
 
       const totalJobs = parseInt(totalRes.rows[0].total);
       const topSkills = topSkillsRes.rows.map(r => `${r.name} (${r.count} jobs)`).join(', ');
       const topLocations = topLocRes.rows.map(r => `${r.name} (${r.count} jobs)`).join(', ');
       const avgMin = salaryRes.rows[0].avg_min ? Math.round(parseFloat(salaryRes.rows[0].avg_min)).toLocaleString() : 'N/A';
       const avgMax = salaryRes.rows[0].avg_max ? Math.round(parseFloat(salaryRes.rows[0].avg_max)).toLocaleString() : 'N/A';
-
-      const contextLabel = roleName ? `cho vị trí "${roleName}"` : 'toàn thị trường IT';
 
       const prompt = `Bạn là chuyên gia phân tích thị trường lao động IT tại Việt Nam. Dưới đây là dữ liệu THỰC TẾ từ database tuyển dụng ${contextLabel}:
 

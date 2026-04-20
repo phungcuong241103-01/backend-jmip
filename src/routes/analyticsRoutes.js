@@ -224,7 +224,7 @@ router.get('/roles', analyticsController.getRoleAnalytics);
  * /api/analytics/filtered:
  *   get:
  *     summary: Dữ liệu phân tích tổng hợp (có filter)
- *     description: Trả về tất cả dữ liệu analytics trong 1 request, hỗ trợ lọc theo role_id
+ *     description: Trả về tất cả dữ liệu analytics trong 1 request, hỗ trợ lọc theo role_id, location_id, level_id, skill_id
  *     tags: [Analytics]
  *     parameters:
  *       - in: query
@@ -232,6 +232,21 @@ router.get('/roles', analyticsController.getRoleAnalytics);
  *         schema:
  *           type: integer
  *         description: ID của role để lọc (optional)
+ *       - in: query
+ *         name: location_id
+ *         schema:
+ *           type: integer
+ *         description: ID của location để lọc (optional)
+ *       - in: query
+ *         name: level_id
+ *         schema:
+ *           type: integer
+ *         description: ID của level để lọc (optional)
+ *       - in: query
+ *         name: skill_id
+ *         schema:
+ *           type: integer
+ *         description: ID của skill để lọc (optional)
  *     responses:
  *       200:
  *         description: Dữ liệu analytics tổng hợp
@@ -251,6 +266,21 @@ router.get('/filtered', analyticsController.getFilteredAnalytics.bind(analyticsC
  *         schema:
  *           type: integer
  *         description: ID của role để lọc (optional)
+ *       - in: query
+ *         name: location_id
+ *         schema:
+ *           type: integer
+ *         description: ID của location để lọc (optional)
+ *       - in: query
+ *         name: level_id
+ *         schema:
+ *           type: integer
+ *         description: ID của level để lọc (optional)
+ *       - in: query
+ *         name: skill_id
+ *         schema:
+ *           type: integer
+ *         description: ID của skill để lọc (optional)
  *     responses:
  *       200:
  *         description: Nhận xét AI
