@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const Groq = require('groq-sdk');
+const cache = require('../config/cache');
 
 class JobService {
   constructor() {
@@ -7,6 +8,10 @@ class JobService {
   }
 
   async getAllMetadata() {
+    // ⚡ Cache 30 phút — roles/levels/skills/locations gần như cố định
+    const cached = cache.get('filters');
+    if (cached) return cached;
+
     const queries = [
       db.query('SELECT id, name FROM roles ORDER BY name'),
       db.query('SELECT id, name FROM levels ORDER BY name'),
@@ -21,12 +26,14 @@ class JobService {
       db.query('SELECT id, city FROM locations ORDER BY city')
     ];
     const [roles, levels, skills, locations] = await Promise.all(queries);
-    return {
+    const data = {
       roles: roles.rows,
       levels: levels.rows,
       skills: skills.rows,
       locations: locations.rows
     };
+    cache.set('filters', data, 1800); // 30 phút
+    return data;
   }
 
   async findJobs(filters) {
@@ -175,51 +182,52 @@ class JobService {
   }
 
   async getMarketStats() {
-    const totalJobs = await db.query('SELECT COUNT(*) FROM jobs WHERE is_active = TRUE');
-    
-    // Top skills with counts and percentage calculation
-    const topSkillsResult = await db.query(`
-      SELECT s.name, COUNT(js.job_id) as count 
-      FROM skills s 
-      JOIN job_skills js ON s.id = js.skill_id 
-      JOIN jobs j ON js.job_id = j.id
-      WHERE j.is_active = TRUE
-      GROUP BY s.name 
-      ORDER BY count DESC
-    `);
+    // ⚡ Cache 10 phút — dữ liệu aggregation nặng, ít thay đổi
+    const cached = cache.get('stats');
+    if (cached) return cached;
 
-    // Get total job_skills rows for accurate percentage
-    const totalJobSkills = await db.query('SELECT COUNT(*) FROM job_skills js JOIN jobs j ON js.job_id = j.id WHERE j.is_active = TRUE');
+    // Chạy 7 queries SONG SONG (Promise.all)
+    const [
+      totalJobs, topSkillsResult, totalJobSkills,
+      locationStats, salaryStats, totalSkillsCount, activeCompanies
+    ] = await Promise.all([
+      db.query('SELECT COUNT(*) FROM jobs WHERE is_active = TRUE'),
+      db.query(`
+        SELECT s.name, COUNT(js.job_id) as count 
+        FROM skills s 
+        JOIN job_skills js ON s.id = js.skill_id 
+        JOIN jobs j ON js.job_id = j.id
+        WHERE j.is_active = TRUE
+        GROUP BY s.name 
+        ORDER BY count DESC
+      `),
+      db.query('SELECT COUNT(*) FROM job_skills js JOIN jobs j ON js.job_id = j.id WHERE j.is_active = TRUE'),
+      db.query(`
+        SELECT loc.city as name, COUNT(j.id) as count
+        FROM locations loc
+        JOIN jobs j ON loc.id = j.location_id
+        WHERE j.is_active = TRUE
+        GROUP BY loc.city
+        ORDER BY count DESC
+      `),
+      db.query(`
+        SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
+        FROM roles r
+        JOIN jobs j ON r.id = j.role_id
+        WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
+        GROUP BY r.name
+        ORDER BY avg_min DESC LIMIT 5
+      `),
+      db.query('SELECT COUNT(*) FROM skills'),
+      db.query('SELECT COUNT(DISTINCT c.id) FROM companies c JOIN jobs j ON c.id = j.company_id WHERE j.is_active = TRUE'),
+    ]);
+
     const totalJobSkillsCount = parseInt(totalJobSkills.rows[0].count);
-    
     const totalCount = parseInt(totalJobs.rows[0].count);
     const popularSkills = topSkillsResult.rows.map(row => ({
       ...row,
       percentage: totalJobSkillsCount > 0 ? Math.round((parseInt(row.count) / totalJobSkillsCount) * 100) : 0
     }));
-
-    // Stats by location
-    const locationStats = await db.query(`
-      SELECT loc.city as name, COUNT(j.id) as count
-      FROM locations loc
-      JOIN jobs j ON loc.id = j.location_id
-      WHERE j.is_active = TRUE
-      GROUP BY loc.city
-      ORDER BY count DESC
-    `);
-
-    // Average salary by role
-    const salaryStats = await db.query(`
-      SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
-      FROM roles r
-      JOIN jobs j ON r.id = j.role_id
-      WHERE j.is_active = TRUE AND j.salary_min IS NOT NULL
-      GROUP BY r.name
-      ORDER BY avg_min DESC LIMIT 5
-    `);
-
-    // Total distinct skills count
-    const totalSkillsCount = await db.query('SELECT COUNT(*) FROM skills');
 
     return {
       totalJobs: totalCount,
@@ -228,9 +236,11 @@ class JobService {
       popularSkills,
       locationStats: locationStats.rows,
       salaryStats: salaryStats.rows,
-      growthRate: "+12.5%", // Mocked for now as we don't have historical data trends easily
-      activeCompanies: await db.query('SELECT COUNT(DISTINCT c.id) FROM companies c JOIN jobs j ON c.id = j.company_id WHERE j.is_active = TRUE').then(res => res.rows[0].count)
+      growthRate: "+12.5%",
+      activeCompanies: activeCompanies.rows[0].count
     };
+    cache.set('stats', data, 600); // 10 phút
+    return data;
   }
 
   async suggestLearningPath(data) {

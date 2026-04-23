@@ -1,9 +1,14 @@
 const db = require('../config/db');
+const cache = require('../config/cache');
 
 class LocationController {
   async getAll(req, res, next) {
     try {
+      const cached = cache.get('meta:locations');
+      if (cached) return res.json(cached);
+
       const result = await db.query('SELECT * FROM locations ORDER BY city ASC');
+      cache.set('meta:locations', result.rows, 3600); // 1 giờ
       res.json(result.rows);
     } catch (err) {
       next(err);
