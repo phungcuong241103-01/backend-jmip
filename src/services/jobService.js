@@ -37,9 +37,18 @@ class JobService {
   }
 
   async findJobs(filters) {
-    const { role, level, location, page = 1, limit = 50, search = '', skills } = filters;
-    const offset = (page - 1) * limit;
+    const { role, level, location, page = 1, limit = 10, search = '', skills } = filters;
     
+    // ⚡ Giới hạn limit tối đa 50 để tránh query quá nặng
+    const safeLimit = Math.min(parseInt(limit) || 10, 50);
+    const safePage = Math.max(parseInt(page) || 1, 1);
+    const offset = (safePage - 1) * safeLimit;
+    
+    // ⚡ Cache theo filter params — TTL 60 giây
+    const cacheKey = `jobs:${JSON.stringify({ role, level, location, search, skills, page: safePage, limit: safeLimit })}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
     let baseJoins = `
       LEFT JOIN companies c ON j.company_id = c.id
       LEFT JOIN roles r ON j.role_id = r.id
@@ -80,42 +89,57 @@ class JobService {
       }
     }
 
-    // Count total matches
-    const countResult = await db.query(`
-      SELECT COUNT(DISTINCT j.id) 
-      FROM jobs j 
-      ${baseJoins} 
-      ${baseWhere}
-    `, values);
+    // ⚡ Chạy COUNT và FETCH song song (Promise.all) — trước đây chạy tuần tự
+    const countValues = [...values];
+    const fetchValues = [...values, safeLimit, offset];
+    const limitParam = counter++;
+    const offsetParam = counter++;
+
+    const [countResult, result] = await Promise.all([
+      // Query 1: Đếm tổng kết quả
+      db.query(`
+        SELECT COUNT(DISTINCT j.id) 
+        FROM jobs j 
+        ${baseJoins} 
+        ${baseWhere}
+      `, countValues),
+
+      // Query 2: Lấy data phân trang — JOIN skills/levels cùng lúc
+      db.query(`
+        SELECT j.id, j.title, j.salary_min, j.salary_max, j.url, j.posted_at,
+               j.is_active,
+               c.name as company_name, r.name as role_name, loc.city,
+               COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') as skills,
+               COALESCE(array_agg(DISTINCT l2.name) FILTER (WHERE l2.name IS NOT NULL), '{}') as level_names
+        FROM jobs j
+        ${baseJoins}
+        LEFT JOIN job_skills js ON j.id = js.job_id
+        LEFT JOIN skills s ON js.skill_id = s.id
+        LEFT JOIN job_levels jl2 ON j.id = jl2.job_id
+        LEFT JOIN levels l2 ON jl2.level_id = l2.id
+        ${baseWhere}
+        GROUP BY j.id, j.title, j.salary_min, j.salary_max, j.url, j.posted_at,
+                 j.is_active, c.name, r.name, loc.city
+        ORDER BY j.posted_at DESC
+        LIMIT $${limitParam} OFFSET $${offsetParam}
+      `, fetchValues)
+    ]);
+
     const totalItems = parseInt(countResult.rows[0].count);
 
-    // Fetch paginated results
-    let query = `
-      SELECT j.*, c.name as company_name, r.name as role_name, loc.city,
-             COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') as skills,
-             COALESCE(array_agg(DISTINCT l.name) FILTER (WHERE l.name IS NOT NULL), '{}') as level_names
-      FROM jobs j
-      ${baseJoins}
-      LEFT JOIN job_skills js ON j.id = js.job_id
-      LEFT JOIN skills s ON js.skill_id = s.id
-      ${baseWhere}
-      GROUP BY j.id, c.name, r.name, loc.city
-      ORDER BY j.posted_at DESC
-      LIMIT $${counter++} OFFSET $${counter++}
-    `;
-    values.push(limit, offset);
-
-    const result = await db.query(query, values);
-    
-    return {
+    const data = {
       jobs: result.rows,
       pagination: {
         totalItems,
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalItems / limit),
-        limit: parseInt(limit)
+        currentPage: safePage,
+        totalPages: Math.ceil(totalItems / safeLimit),
+        limit: safeLimit
       }
     };
+
+    // ⚡ Cache kết quả 60 giây
+    cache.set(cacheKey, data, 60);
+    return data;
   }
 
   async predictSalary(data) {
@@ -229,7 +253,8 @@ class JobService {
       percentage: totalJobSkillsCount > 0 ? Math.round((parseInt(row.count) / totalJobSkillsCount) * 100) : 0
     }));
 
-    return {
+    // ⚡ FIX: cache.set TRƯỚC return (trước đây là dead code — nằm sau return)
+    const data = {
       totalJobs: totalCount,
       totalSkills: parseInt(totalSkillsCount.rows[0].count),
       totalJobSkills: totalJobSkillsCount,

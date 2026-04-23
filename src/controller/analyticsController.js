@@ -25,6 +25,10 @@ class AnalyticsController {
 
   async getSkills(req, res, next) {
     try {
+      // ⚡ Cache 10 phút — skills aggregation ít thay đổi
+      const cached = cache.get('analytics:skills');
+      if (cached) return res.json(cached);
+
       const result = await db.query(`
         SELECT s.name, COUNT(js.job_id) as count
         FROM skills s
@@ -35,13 +39,15 @@ class AnalyticsController {
         ORDER BY count DESC
       `);
 
-      res.json({
+      const response = {
         status: 'success',
         data: result.rows.map(row => ({
           name: row.name,
           count: parseInt(row.count)
         }))
-      });
+      };
+      cache.set('analytics:skills', response, 600); // 10 phút
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -49,6 +55,10 @@ class AnalyticsController {
 
   async getSalary(req, res, next) {
     try {
+      // ⚡ Cache 10 phút
+      const cached = cache.get('analytics:salary');
+      if (cached) return res.json(cached);
+
       const result = await db.query(`
         SELECT r.name as role, AVG(j.salary_min) as avg_min, AVG(j.salary_max) as avg_max
         FROM roles r
@@ -59,14 +69,16 @@ class AnalyticsController {
         LIMIT 10
       `);
 
-      res.json({
+      const response = {
         status: 'success',
         data: result.rows.map(row => ({
           role: row.role,
           avg_min: Math.round(row.avg_min),
           avg_max: Math.round(row.avg_max)
         }))
-      });
+      };
+      cache.set('analytics:salary', response, 600);
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -74,6 +86,10 @@ class AnalyticsController {
 
   async getTrend(req, res, next) {
     try {
+      // ⚡ Cache 10 phút
+      const cached = cache.get('analytics:trend');
+      if (cached) return res.json(cached);
+
       const result = await db.query(`
         SELECT DATE(posted_at) as date, COUNT(id) as count
         FROM jobs
@@ -83,13 +99,15 @@ class AnalyticsController {
         LIMIT 30
       `);
 
-      res.json({
+      const response = {
         status: 'success',
         data: result.rows.map(row => ({
           date: row.date,
           count: parseInt(row.count)
         }))
-      });
+      };
+      cache.set('analytics:trend', response, 600);
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -97,6 +115,10 @@ class AnalyticsController {
 
   async getSalaryByRole(req, res, next) {
     try {
+      // ⚡ Cache 10 phút
+      const cached = cache.get('analytics:salaryByRole');
+      if (cached) return res.json(cached);
+
       const result = await db.query(`
         SELECT l.name as role, 
                AVG(j.salary_min) as avg_min, 
@@ -110,7 +132,7 @@ class AnalyticsController {
         ORDER BY avg_min DESC
       `);
 
-      res.json({
+      const response = {
         status: 'success',
         data: result.rows.map(row => ({
           role: row.role,
@@ -118,7 +140,9 @@ class AnalyticsController {
           avg_max: Math.round(parseFloat(row.avg_max)),
           job_count: parseInt(row.job_count)
         }))
-      });
+      };
+      cache.set('analytics:salaryByRole', response, 600);
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -126,6 +150,10 @@ class AnalyticsController {
 
   async getLevelStats(req, res, next) {
     try {
+      // ⚡ Cache 10 phút
+      const cached = cache.get('analytics:levelStats');
+      if (cached) return res.json(cached);
+
       const result = await db.query(`
         SELECT l.name as level, COUNT(DISTINCT j.id) as job_count
         FROM levels l
@@ -135,13 +163,15 @@ class AnalyticsController {
         ORDER BY job_count DESC
       `);
 
-      res.json({
+      const response = {
         status: 'success',
         data: result.rows.map(row => ({
           level: row.level,
           job_count: parseInt(row.job_count)
         }))
-      });
+      };
+      cache.set('analytics:levelStats', response, 600);
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -149,6 +179,10 @@ class AnalyticsController {
 
   async getRoleAnalytics(req, res, next) {
     try {
+      // ⚡ Cache 10 phút
+      const cached = cache.get('analytics:roleAnalytics');
+      if (cached) return res.json(cached);
+
       // ⚡ Chạy 3 queries SONG SONG thay vì tuần tự (Promise.all)
       const [rolesResult, skillsResult, salaryResult] = await Promise.all([
         // Đếm jobs trực tiếp qua jobs.role_id (chính xác)
@@ -200,7 +234,7 @@ class AnalyticsController {
         };
       }
 
-      res.json({
+      const response = {
         status: 'success',
         data: rolesResult.rows.map(row => ({
           id: row.id,
@@ -211,7 +245,9 @@ class AnalyticsController {
           skills: (skillsByRole[row.id] || []).slice(0, 10).map(s => s.name),
           skills_detail: (skillsByRole[row.id] || []).slice(0, 10)
         }))
-      });
+      };
+      cache.set('analytics:roleAnalytics', response, 600);
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -259,8 +295,6 @@ class AnalyticsController {
       if (cached) return res.json(cached);
 
       // ⚡ Chạy 8 queries SONG SONG thay vì tuần tự (Promise.all)
-      // Trước: ~7-10 giây (mỗi query đợi cái trước xong)
-      // Sau:   ~2-3 giây (tất cả chạy cùng lúc, chỉ đợi query chậm nhất)
       const [
         totalResult, skillsResult, locationsResult, trendResult,
         rolesResult, salaryByLevelResult, levelsResult, companiesResult
@@ -385,6 +419,11 @@ class AnalyticsController {
       const { where, params } = this._buildFilters(req.query);
       const { role_id, location_id, level_id, skill_id } = req.query;
 
+      // ⚡ Cache AI insights 15 phút (tránh gọi Groq API lặp lại)
+      const aiCacheKey = `analytics:ai:${JSON.stringify(req.query)}`;
+      const cached = cache.get(aiCacheKey);
+      if (cached) return res.json(cached);
+
       // Gather data summary for AI
       const [totalRes, topSkillsRes, topLocRes, salaryRes] = await Promise.all([
         db.query(`SELECT COUNT(*) as total FROM jobs j WHERE j.is_active = TRUE${where}`, params),
@@ -456,10 +495,14 @@ Trả về format JSON: {"insights": ["nhận xét 1", "nhận xét 2", "nhận 
       const jsonMatch = text.match(/\{.*\}/s);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        return res.json({ status: 'success', data: parsed });
+        const result = { status: 'success', data: parsed };
+        cache.set(aiCacheKey, result, 900); // 15 phút
+        return res.json(result);
       }
 
-      res.json({ status: 'success', data: { insights: [text] } });
+      const fallback = { status: 'success', data: { insights: [text] } };
+      cache.set(aiCacheKey, fallback, 900);
+      res.json(fallback);
     } catch (err) {
       console.error('AI Insights error:', err);
       // Graceful fallback — don't crash the page

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const swaggerUi = require('swagger-ui-express');
@@ -16,6 +17,7 @@ const port = process.env.PORT || 5000;
 
 // Middlewares
 app.use(cors());
+app.use(compression());  // ⚡ Gzip/Brotli — giảm 60-80% response size
 app.use(express.json());
 
 // Swagger Documentation

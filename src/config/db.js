@@ -18,7 +18,14 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: String(process.env.DB_PASSWORD || ''),
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+
+  // ⚡ Pool tuning — tối ưu cho high-concurrency
+  max: parseInt(process.env.DB_POOL_MAX || '25'),         // Tối đa 25 connections (mặc định pg chỉ 10)
+  min: 5,                                                  // Giữ sẵn 5 connections idle
+  idleTimeoutMillis: 30000,                                // Đóng connection idle sau 30s
+  connectionTimeoutMillis: 10000,                          // Timeout nếu không lấy được connection trong 10s
+  statement_timeout: 15000,                                // Kill query chạy quá 15s
 });
 
 pool.on('connect', () => {
