@@ -4,7 +4,13 @@ const cache = require('../config/cache');
 
 class JobService {
   constructor() {
-    this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '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' });
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error("Missing GROQ_API_KEY in environment variables");
+    }
+
+    this.groq = new Groq({ 
+      apiKey: process.env.GROQ_API_KEY 
+    });
   }
 
   async getAllMetadata() {
