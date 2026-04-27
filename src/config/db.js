@@ -4,21 +4,39 @@ const path = require('path');
 // Try loading .env file (won't exist on Render/Docker — env vars set via dashboard)
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
-// Log missing critical env vars to help debug deployment issues
-const requiredEnvVars = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
-const missingVars = requiredEnvVars.filter(v => !process.env[v]);
-if (missingVars.length > 0) {
-  console.error(`⚠️  Missing environment variables: ${missingVars.join(', ')}`);
-  console.error('Set these in Render Dashboard > Environment > Environment Variables');
+// ═══════════════════════════════════════════════════════════════════════════════
+// Support both DATABASE_URL (cloud standard) and individual env vars
+// ═══════════════════════════════════════════════════════════════════════════════
+let poolConfig;
+
+if (process.env.DATABASE_URL) {
+  // Cloud-style: single connection string (Render, Railway, Heroku, etc.)
+  console.log('🔗 Using DATABASE_URL for database connection');
+  poolConfig = {
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  };
+} else {
+  // Individual env vars
+  const requiredEnvVars = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+  const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+  if (missingVars.length > 0) {
+    console.error(`⚠️  Missing environment variables: ${missingVars.join(', ')}`);
+    console.error('💡 TIP: Set DATABASE_URL or individual DB_* vars in Render Dashboard > Environment');
+  }
+
+  poolConfig = {
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: String(process.env.DB_PASSWORD || ''),
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  };
 }
 
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: String(process.env.DB_PASSWORD || ''),
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  ...poolConfig,
 
   // ⚡ Pool tuning — tối ưu cho high-concurrency
   max: parseInt(process.env.DB_POOL_MAX || '25'),         // Tối đa 25 connections (mặc định pg chỉ 10)
