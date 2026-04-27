@@ -4,7 +4,13 @@ const cache = require('../config/cache');
 
 class AnalyticsController {
   constructor() {
-    this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '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' });
+    const apiKey = process.env.GROQ_API_KEY;
+    if (apiKey) {
+      this.groq = new Groq({ apiKey });
+    } else {
+      console.warn('⚠️ GROQ_API_KEY not set — AI Insights will be unavailable');
+      this.groq = null;
+    }
   }
 
   async getOverview(req, res, next) {
